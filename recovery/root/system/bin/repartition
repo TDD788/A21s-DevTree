@@ -1,0 +1,32 @@
+#!/system/bin/sh
+read -p "Set a custom SUPER size" SUPERSIZE
+PRISMSIZE=30
+
+SGDISK=/system/bin/sgdisk
+DISK=/dev/block/mmcblk0
+
+DISKCODE=`sh $SGDISK --print $DISK | grep super | awk '{printf $6}'`
+SECSIZE=`sh $SGDISK --print $DISK | grep 'sector size' | awk '{printf $4}'`
+
+
+function delete() {
+	$SGDISK --delete=$1 $DISK
+	
+}
+
+function calculate() {
+	SYSPART=`sh $SGDISK --print $DISK | grep super | awk '{printf $1}'`
+	delete $SYSPART
+	PRISMPART=`$sh SGDISK --print $DISK | grep prism | awk '{printf $1}'`
+	delete $PRISMPART
+
+}
+	
+function repart() {
+    sh $SGDISK --new=0:0:+${SUPERSIZE}Mib --typecode=0:$DISKCODE --change-name=0:super $DISK
+	sh $SGDISK --new=0:0:+${PRISMSIZE}Mib --typecode=0:$DISKCODE --change-name=0:prism $DISK
+
+}
+
+calculate
+repart
