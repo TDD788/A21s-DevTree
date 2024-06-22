@@ -1,4 +1,4 @@
-LOCAL_PATH := device/samsung/a21s
+LOCAL_PATH := device/samsung/a12s
 
 # Dynamic partitions
 PRODUCT_USE_DYNAMIC_PARTITIONS := true
