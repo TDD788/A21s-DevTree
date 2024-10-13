@@ -43,6 +43,10 @@ on:
         description: 'Specify your Device Codename'
         required: true
         default: 'a21s'
+      KERNEL:
+        description: 'Add kernel Source'
+        required: false
+        default: ''
       BUILD_TARGET:
         description: "Set partition to build"
         required: true
@@ -95,8 +99,8 @@ jobs:
     - name: Swap Space
       uses: pierotofy/set-swap-space@master
       with:
-        swap-size-gb: 32
-      
+        swap-size-gb: 16
+       
     - name: Build Environment
       run: |
        sudo apt-get update
@@ -116,6 +120,7 @@ jobs:
        sudo apt install lzma
        sudo apt install git aria2 -y
        sudo apt install nodejs
+       sudo apt install ccache
        git clone https://gitlab.com/OrangeFox/misc/scripts
        cd scripts
        sudo bash setup/android_build_env.sh
@@ -135,7 +140,17 @@ jobs:
         git clone https://gitlab.com/OrangeFox/sync.git -b master
         cd sync
         ./orangefox_sync.sh --branch ${{ github.event.inputs.MANIFEST }} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST }}
-      
+        
+    - name: Sync Kernel Source
+      if: ${{ github.event.inputs.KERNEL }}
+      run: |
+          cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST }}
+          DEVICE_DIRECTORY="${{ github.event.inputs.DEVICE_PATH }}"
+          MTF_DEVICE="${DEVICE_DIRECTORY#*/}"
+          KERNEL_PATH="kernel/$MTF_DEVICE"
+          git clone ${{ github.event.inputs.KERNEL }} $KERNEL_PATH
+          cd ${GITHUB_WORKSPACE}
+
     - name: Clone Device Tree
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST }}
@@ -150,13 +165,14 @@ jobs:
         source build/envsetup.sh
         export ALLOW_MISSING_DEPENDENCIES=true
         export BOARD_RAMDISK_USE_LZMA=true
+        export USE_CCACHE=1
+        export CCACHE_dir=${GITHUB_WORKSPACE}
         set -e
         lunch twrp_${{ github.event.inputs.DEVICE_NAME }}-eng && make clean && mka adbd ${{ inputs.BUILD_TARGET }}image -j$(nproc --all)
-      continue-on-error: true
     
     - name: Upload files
       if: ${{ github.event.inputs.RELEASE_TYPE == 'false' }}
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
        name: Orange Fox Recovery for ${{ github.event.inputs.DEVICE_NAME }} ${{ env.BUILD_DATE }} Image
        path: |
@@ -164,7 +180,7 @@ jobs:
         
     - name: Upload files
       if: ${{ github.event.inputs.RELEASE_TYPE == 'false' }}
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
        name: Orange Fox Recovery for ${{ github.event.inputs.DEVICE_NAME }} ${{ env.BUILD_DATE }} Zip
        path: |
@@ -172,7 +188,7 @@ jobs:
         
     - name: Upload files
       if: ${{ github.event.inputs.RELEASE_TYPE == 'false' }}
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
        name: Orange Fox Recovery for ${{ github.event.inputs.DEVICE_NAME }} ${{ env.BUILD_DATE }} Tar
        path: |
@@ -187,6 +203,7 @@ jobs:
         echo "MD5_RRAMDISK=$(md5sum out/target/product/${{ github.event.inputs.DEVICE_NAME }}/ramdisk.img | cut -d ' ' -f 1)" >> $GITHUB_ENV
         echo "MD5_ZIP=$(md5sum out/target/product/${{ github.event.inputs.DEVICE_NAME }}/OrangeFox*.zip | cut -d ' ' -f 1)" >> $GITHUB_ENV
         echo "MD5_TAR=$(md5sum out/target/product/${{ github.event.inputs.DEVICE_NAME }}/OrangeFox*.tar | cut -d ' ' -f 1)" >> $GITHUB_ENV
+        echo "MD5_RIMG=$(md5sum out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery.img | cut -d ' ' -f 1)" >> $GITHUB_ENV
      
     - name: Upload to Release
       if: ${{ github.event.inputs.RELEASE_TYPE == 'true' }}
@@ -196,7 +213,8 @@ jobs:
           OrangeFox/fox_${{ github.event.inputs.MANIFEST }}/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/OrangeFox*.img
           OrangeFox/fox_${{ github.event.inputs.MANIFEST }}/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/ramdisk.img
           OrangeFox/fox_${{ github.event.inputs.MANIFEST }}/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/ramdisk-recovery.img
-          OrangeFox/fox_${{ github.event.inputs.MANIFEST }}/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/OrangeFox*.tar
+          OrangeFox/fox_${{ github.event.inputs.MANIFEST }}/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery.img
+          OrangeFox/fox_${{ github.event.inputs.MANIFEST }}/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/*.tar
           OrangeFox/fox_${{ github.event.inputs.MANIFEST }}/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/OrangeFox*.zip
         name: OrangeFox Recovery for ${{ github.event.inputs.DEVICE_NAME }} // ${{ env.BUILD_DATE }}
         tag_name: ofrp${{ github.run_id }}
@@ -207,6 +225,7 @@ jobs:
           Commit: Most recent [commit](${{ github.event.inputs.DEVICE_TREE }}/commit/${{ env.COMMIT_ID }}) during building.
           ## MD5SUM
           * ${{ env.MD5_IMG }} for IMAGE file.
+          * ${{ env.MD5_RIMG }} for IMAGE file.
           * ${{ env.MD5_RAMDISK }} for RAMDISK file.
           * ${{ env.MD5_RRAMDISK }} for RECOVERY RAMDISK file.
           * ${{ env.MD5_ZIP }} for ORANGE FOX ZIP file.
@@ -222,6 +241,7 @@ jobs:
         DEVICE_TREE_BRANCH: ${{ github.event.inputs.DEVICE_TREE_BRANCH }}
         COMMIT_ID: ${{ env.COMMIT_ID }}
         MD5_IMG: ${{ env.MD5_IMG }}
+        MD5_RIMG: ${{ env.MD5_RIMG }}
         MD5_RAMDISK: ${{ env.MD5_RAMDISK }}
         MD5_RRAMDISK: ${{ env.MD5_RRAMDISK }}
         MD5_ZIP: ${{ env.MD5_ZIP }}
@@ -238,6 +258,7 @@ jobs:
         <b>Commit:</b> Most recent <a href=\"${{ env.DEVICE_TREE }}/commit/${{ env.COMMIT_ID }}\">commit</a> during building.
         <b><pre>MD5SUM:</pre></b>
         <pre><b>${{ env.MD5_IMG }}</b> for IMAGE file.</pre>
+        <pre><b>${{ env.MD5_RIMG }}</b> for IMAGE file.</pre>
         <pre><b>${{ env.MD5_RAMDISK }}</b> for RAMDISK file.</pre>
         <pre><b>${{ env.MD5_RRAMDISK }}</b> for RECOVERY RAMDISK file.</pre>
         <pre><b>${{ env.MD5_ZIP }}</b> for ORANGE FOX ZIP file.</pre>
@@ -327,7 +348,7 @@ jobs:
 
     - name: Upload files
       if: ${{ github.event.inputs.RELEASE_TYPE == 'false' }}
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
        name: TWRP Recovery for ${{ github.event.inputs.DEVICE_NAME }} ${{ env.BUILD_DATE }} Image
        path: |
@@ -469,7 +490,7 @@ jobs:
 
     - name: Upload files
       if: ${{ github.event.inputs.RELEASE_TYPE == 'false' }}
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
        name: PBRP Recovery for ${{ github.event.inputs.DEVICE_NAME }} ${{ env.BUILD_DATE }} Image
        path: |
@@ -613,7 +634,7 @@ jobs:
       
     - name: Upload files
       if: ${{ github.event.inputs.RELEASE_TYPE == 'false' }}
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
        name: SHRP Recovery for ${{ github.event.inputs.DEVICE_NAME }} ${{ env.BUILD_DATE }} Image
        path: |
